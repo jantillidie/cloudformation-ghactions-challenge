@@ -25,6 +25,6 @@ jobs:
       - name: Deploy to AWS CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
-          name: CloudFormation challenge stack
+          name: CloudFormation-challenge-stack
           template: cf-stack.yml
           no-fail-on-empty-changeset: "1"
