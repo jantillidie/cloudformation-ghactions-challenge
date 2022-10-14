@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Friday Challenge
+
+Parameters:
+  FridayVpcCidr:
+    Type: String
+    Default: 10.0.0.0/20
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.0.0/24
+
+  AmazonLinuxAMIID:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  
+  FridayVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref FridayVpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: Friday VPC
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Friday IGW
+
+  VPCtoIGWConnection:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn:
+      - IGW
+      - FridayVPC
+    Properties:
+      InternetGatewayId: !Ref IGW
+      VpcId: !Ref FridayVPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: FridayVPC
+    Properties:
+      VpcId: !Ref FridayVPC
+      Tags:
+        - Key: Name
+          Value: Public Route Table
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - PublicRouteTable
+      - IGW
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      GatewayId: !Ref IGW
+      DestinationCidrBlock: 0.0.0.0/0
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: FridayVPC
+    Properties:
+      VpcId: !Ref FridayVPC
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs 
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: Public Subnet
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn: 
+      - PublicRouteTable
+      - PublicSubnet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: FridayVPC
+    Properties:
+      GroupDescription: Enable access to App
+      GroupName: App
+      VpcId: !Ref FridayVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: App
+
+  FridayEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmazonLinuxAMIID
+      InstanceType: t3.micro
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      SubnetId: !Ref PublicSubnet
+      KeyName: "vockey"
+      Tags:
+        - Key: Name
+          Value: "App Server"
+      UserData:
+        Fn::Base64: 
+          !Sub |
+            #!/bin/bash
+            echo "start install"
+            yum update -y
+            echo "install webserver"
+            yum install -y httpd
+            systemctl enable httpd
+            systemctl start httpd
+            echo "<!DOCTYPE html>
+                  <html lang='en'>
+                  <head>
+                      <meta charset='UTF-8'>
+                      <title>Placepaca</title>
+                  </head>
+                  <style>
+                      html,body {
+                          height: 100%;
+                          background-color: #5d855d;
+                      }
+                      img {
+                          border-radius: 100px;
+                          position: absolute;
+                          top: 10px;
+                          left: 10px;
+                          transition: transform 1s;
+                      }
+                  </style>
+                  <body>
+                      <img id='alpaca' src='https://images.placepaca.com/Alpaka_10.jpg' width='100'/>
+                      <p>
+                          click to place alpaca
+                      </p>
+                  </body>
+                  <script>
+                      const alpaca = document.getElementById('alpaca');
+                      document.addEventListener('click', function(ev){
+                          alpaca.style.transform = 'translateY('+(ev.clientY-25)+'px)';
+                          alpaca.style.transform += 'translateX('+(ev.clientX-25)+'px)';
+                      },false);
+                  </script>
+                  </html>" > /var/www/html/index.html
+
+Outputs:
+  FridayVPCDefaultSecurityGroup:
+    Value: !Sub ${FridayVPC.DefaultSecurityGroup}
